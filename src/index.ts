@@ -63,17 +63,17 @@ class Sticker {
   get height () {
     return this.img.height * this.scale;
   }
-  get centerX  () {
+  get centerX () {
     return - (this.width / 2) + this.x;
   } 
-  get centerY  () {
+  get centerY () {
     return - (this.height / 2) + this.y;
   } 
 }
 
 // 2. 스티커 보드 
 class StickerBoard {
-  private handlSize = 50;
+  private handlSize = 40;
   store: Sticker[] = [];
   focus: Sticker|null = null;
 
@@ -131,31 +131,35 @@ class StickerBoard {
     this.ctx.closePath();
   }
   drawRemoveRect(sticker: Sticker, hide: boolean) {
-    const {centerX, centerY} = sticker;
-    const x = centerX - this.handlSize / 2;
-    const y = centerY - this.handlSize / 2;
+    const {x, y, centerX, centerY, width, height} = sticker;
+    const arcX = centerX - this.ctx.lineWidth / 2;
+    const arcY = centerY - this.ctx.lineWidth / 2;
+    const radius = (this.handlSize / 2) + this.ctx.lineWidth;
+
     this.ctx.beginPath();
     this.ctx.strokeStyle = "cyan";
     this.ctx.lineWidth = !hide ? 5 : 0;
-    this.ctx.rect(x, y, this.handlSize, this.handlSize);
+    this.ctx.arc(arcX, arcY, radius, 0, 2 * Math.PI)
     if (!hide) {
       this.ctx.globalCompositeOperation = "source-over";
-      this.ctx.drawImage(deleteButton, x, y, this.handlSize, this.handlSize);
+      this.ctx.drawImage(deleteButton, (centerX - this.handlSize / 2) - 5, (centerY - this.handlSize / 2) - 5, this.handlSize + this.ctx.lineWidth, this.handlSize + this.ctx.lineWidth);
       // this.ctx.stroke();
     }
     this.ctx.closePath();
   }
   drawTransformRect(sticker: Sticker, hide: boolean) {
     const {width, height, centerX, centerY} = sticker;
-    const x = (centerX + width) - this.handlSize / 2;
-    const y = (centerY + height) - this.handlSize / 2;
+    const arcX = (centerX + width) - this.ctx.lineWidth / 2;
+    const arcY = (centerY + height) - this.ctx.lineWidth / 2;
+    const radius = (this.handlSize / 2) + this.ctx.lineWidth;
+
     this.ctx.beginPath();
     this.ctx.strokeStyle = "cyan";
     this.ctx.lineWidth = !hide ? 5 : 0;
-    this.ctx.rect(x, y, this.handlSize, this.handlSize);
+    this.ctx.arc(arcX, arcY, radius, 0, 2 * Math.PI)
     if (!hide) {
       this.ctx.globalCompositeOperation = "source-over";
-      this.ctx.drawImage(rotateButton, x, y, this.handlSize, this.handlSize);
+      this.ctx.drawImage(rotateButton, ((centerX + width) - this.handlSize / 2) - 5, ((centerY + height) - this.handlSize / 2) - 5, this.handlSize + this.ctx.lineWidth, this.handlSize + this.ctx.lineWidth);
       // this.ctx.stroke();
     }
     this.ctx.closePath();
@@ -169,12 +173,11 @@ class StickerBoard {
         if (this.ctx.isPointInPath(pageX, pageY)) {  
           this.focus = null;
           this.store.splice(this.store.indexOf(sticker), 1);
-          isFouced = true;
+          return isFouced = true;
         }
         // 스티커 변형
         this.drawTransformRect(sticker, true) 
         if (this.ctx.isPointInPath(pageX, pageY)) {
-          if (this.focus === null) return;
           this.originDegree = getDegree(pageX, pageY, sticker.x, sticker.y);
           this.originDistance = getDistance(pageX, pageY, sticker.x, sticker.y);
           this.isTransform = true;
@@ -186,8 +189,7 @@ class StickerBoard {
       if (this.ctx.isPointInPath(pageX, pageY)) {
         this.focus = sticker;
         this.store.push(...this.store.splice(this.store.indexOf(sticker), 1));
-        this.isTransform = false;
-        isFouced = true;
+        return isFouced = true;
       }
       if (isFouced) return;
     }
@@ -205,20 +207,20 @@ class StickerBoard {
     this.setBoundingClientRect();
     this.draw();
   }
-  transform( pageX: number, pageY: number ) {
+  transform( pageX: number, pageY: number, tx: number, ty: number ) {
     if (this.focus === null) return; 
     const {img, x, y, offsetDegree, minScale, maxScale} = this.focus;
-
+    
     const currentDegree = getDegree(pageX, pageY, x, y);
-    const currentDistance = getDistance(pageX, pageY, x, y);
     const deltaDegree = currentDegree - this.originDegree;
     this.focus.rotate += deltaDegree;
-
+    
+    const currentDistance = getDistance(pageX, pageY, x, y);
     const originWidth = Math.abs(Math.cos(180 / Math.PI * offsetDegree) * this.originDistance);
     const currentWidth = Math.abs(Math.cos(180 / Math.PI * offsetDegree) * currentDistance);
 
     this.focus.scale += currentWidth * 2 / img.width - originWidth * 2 / img.width;
-    this.focus.scale = comp(minScale, this.focus.scale, maxScale);
+    this.focus.scale = comp(this.focus.scale, minScale, maxScale);
 
     this.originDegree = currentDegree;
     this.originDistance = currentDistance;
@@ -249,7 +251,7 @@ class StickerBoard {
     if (this.focus === null) return;
 
     if (this.isTransform) {
-      this.transform(pageX, pageY);
+      this.transform(pageX, pageY, tx, ty);
       this.draw();
     } else {
       const moveX = comp(0, x + tx, this.canvas.width);
