@@ -164,33 +164,38 @@ class StickerBoard {
     }
     this.ctx.closePath();
   }
-  find(pageX: number, pageY: number) {
+  select(pageX: number, pageY: number) {
     for (const sticker of [...this.store].reverse()) {
       let isFouced: boolean = false;
-      if (this.focus?.id === sticker.id) {
-        // 스티커 삭제
-        this.drawRemoveRect(sticker, true)
-        if (this.ctx.isPointInPath(pageX, pageY)) {  
-          this.focus = null;
-          this.store.splice(this.store.indexOf(sticker), 1);
+      setTransform(this.ctx, {x: sticker.x, y: sticker.y, rotate: sticker.rotate}, () => {
+        if (this.focus?.id === sticker.id) {
+          // 스티커 삭제
+          this.drawRemoveRect(sticker, true)
+          if (this.ctx.isPointInPath(pageX, pageY)) {  
+            // console.log('remove')
+            this.focus = null;
+            this.store.splice(this.store.indexOf(sticker), 1);
+            return isFouced = true;
+          }
+          // 스티커 변형
+          this.drawTransformRect(sticker, true) 
+          if (this.ctx.isPointInPath(pageX, pageY)) {
+            // console.log('transform');
+            this.originDegree = getDegree(pageX, pageY, sticker.x, sticker.y);
+            this.originDistance = getDistance(pageX, pageY, sticker.x, sticker.y);
+            this.isTransform = true;
+            isFouced = true;
+          }
+        }
+        // 현재 선택 스티커 해제 후 다른 스티커 선택
+        this.drawMoveRect(sticker, true);
+        if (this.ctx.isPointInPath(pageX, pageY)) {
+          // console.log('move');
+          this.focus = sticker;
+          this.store.push(...this.store.splice(this.store.indexOf(sticker), 1));
           return isFouced = true;
         }
-        // 스티커 변형
-        this.drawTransformRect(sticker, true) 
-        if (this.ctx.isPointInPath(pageX, pageY)) {
-          this.originDegree = getDegree(pageX, pageY, sticker.x, sticker.y);
-          this.originDistance = getDistance(pageX, pageY, sticker.x, sticker.y);
-          this.isTransform = true;
-          isFouced = true;
-        }
-      }
-      // 현재 선택 스티커 해제 후 다른 스티커 선택
-      this.drawMoveRect(sticker, true);
-      if (this.ctx.isPointInPath(pageX, pageY)) {
-        this.focus = sticker;
-        this.store.push(...this.store.splice(this.store.indexOf(sticker), 1));
-        return isFouced = true;
-      }
+      });
       if (isFouced) return;
     }
     // 캔버스 빈 공간 선택
@@ -225,9 +230,19 @@ class StickerBoard {
     this.originDegree = currentDegree;
     this.originDistance = currentDistance;
   }
+  correctionScaleX(v: number) {
+    return v * this.canvas.width / this.width;
+  }
+  correctionScaleY(v: number) {
+    return v * this.canvas.height / this.height
+  }
   correction(clientX: number, clientY: number): [number, number] {
     const {left, top} = this.canvas.getBoundingClientRect();
     return [clientX - left, clientY - top];
+    // return [
+    //   this.correctionScaleX(clientX - left - window.scrollX),
+    //   this.correctionScaleY(clientY - top - window.scrollY),
+    // ];
   }
   setBackground(background: HTMLImageElement|HTMLCanvasElement) {
     this.background = background;
@@ -240,34 +255,35 @@ class StickerBoard {
   downHandler(ev: PointerDownEvent) {
     const {clientX, clientY} = ev;
     const [pageX, pageY] = this.correction(clientX, clientY);
-    this.find(pageX, pageY);
+    this.select(pageX, pageY);
     this.draw();
     return this.focus;
   }
   moveHandler(ev: PointerMoveEvent, sticker: Sticker) {
-    const {tx, ty, clientX, clientY} = ev;
+    const {dx, dy, tx, ty, clientX, clientY} = ev;
     const {x, y} = sticker;
     const [pageX, pageY] = this.correction(clientX, clientY);
-    if (this.focus === null) return;
-
-    if (this.isTransform) {
-      this.transform(pageX, pageY, tx, ty);
-      this.draw();
-    } else {
-      const moveX = comp(0, x + tx, this.canvas.width);
-      const moveY = comp(0, y + ty, this.canvas.height);
-      this.move(moveX, moveY);
-      this.draw()
+    if (pageX <= this.canvas.width && pageY <= this.canvas.height) {
+      if (this.focus === null) return;
+      if (this.isTransform) {
+        this.transform(pageX, pageY, tx, ty);
+        this.draw();
+      } else {
+        const moveX = comp(0, x + dx, this.canvas.width);
+        const moveY = comp(0, y + dy, this.canvas.height);
+        this.move(moveX, moveY);
+        this.draw()
+      }
     }
   }
   upHandler(ev: PointerUpEvent, sticker: Sticker) {
     console.log('upHandler', sticker);
+    this.isTransform = false;
   }
 }
 
 // 메인 로직
 const main = async () => {try {
-  const img1 = await loadImage('https://hashsnap-static.s3.ap-northeast-2.amazonaws.com/kiosk/210611_hera/sticker1.png') as HTMLImageElement;
   const img2 = await loadImage('https://hashsnap-static.s3.ap-northeast-2.amazonaws.com/kiosk/210611_hera/sticker3.png') as HTMLImageElement;
   const img3 = await loadImage('https://hashsnap-static.s3.ap-northeast-2.amazonaws.com/kiosk/210611_hera/sticker10.png') as HTMLImageElement;
   const img4 = await loadImage('https://hashsnap-static.s3.ap-northeast-2.amazonaws.com/kiosk/210611_hera/sticker6.png') as HTMLImageElement;
@@ -287,7 +303,7 @@ const main = async () => {try {
   document.body.appendChild(stickerInner);
   document.body.appendChild(canvas);
 
-  [img1, img2, img3, img4].forEach((img, i) => {
+  [img2, img3, img4].forEach((img, i) => {
     img.style.width = "auto";
     img.style.height = "85px";
     img.style.margin = "0 auto";
@@ -304,7 +320,7 @@ const main = async () => {try {
   dragListener = addDragControl(canvas, {
     down: (ev) => {
       const target = stickerBoard.downHandler(ev);
-      return {...target};
+      return target;
     }, 
     move: (ev, payload) => {
       const {dx, dy, tx, ty} = ev;
