@@ -25,8 +25,8 @@ const setTransform = (ctx: CanvasRenderingContext2D, { x, y, rotate }: { x: numb
 // 1. 스티커 노드 만들기
 class Sticker {
   id!: number;
-  x!: number;
-  y!: number;
+  centerX!: number;
+  centerY!: number;
   minWidth!: number;
   maxWidth!: number;
   scale!: number;
@@ -38,8 +38,8 @@ class Sticker {
     const init = () => {
       Object.assign(this, {
         id,
-        x: left,
-        y: top,
+        centerX: left,
+        centerY: top,
         minWidth,
         maxWidth,
         rotate: 0,
@@ -54,8 +54,8 @@ class Sticker {
     console.log(this);
   }
   move(x: number, y: number){
-    this.x = x;
-    this.y = y;
+    this.centerX = x;
+    this.centerY = y;
   }
   get width () {
     return this.img.width * this.scale;
@@ -63,11 +63,11 @@ class Sticker {
   get height () {
     return this.img.height * this.scale;
   }
-  get centerX () {
-    return - (this.width / 2) + this.x;
+  get left () {
+    return - (this.width / 2) + this.centerX;
   } 
-  get centerY () {
-    return - (this.height / 2) + this.y;
+  get top () {
+    return - (this.height / 2) + this.centerY;
   } 
 }
 
@@ -103,14 +103,14 @@ class StickerBoard {
     this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
     if (this.background) this.ctx.drawImage(this.background, 0, 0);
     this.store.forEach(sticker => {
-      const {img, x, y, rotate, width, height, centerX, centerY} = sticker;
+      const {img, centerX: x, centerY: y, rotate, width, height, left: centerX, top: centerY} = sticker;
       setTransform(this.ctx, {x, y, rotate}, () => {
         this.drawImage(img, centerX, centerY, width, height);
       });
     });
 
     if (this.focus === null) return;
-    setTransform(this.ctx, {x: this.focus.x, y: this.focus.y, rotate: this.focus.rotate}, () => {
+    setTransform(this.ctx, {x: this.focus.centerX, y: this.focus.centerY, rotate: this.focus.rotate}, () => {
       if (this.focus) {
         this.drawMoveRect(this.focus, false);
         this.drawRemoveRect(this.focus, false);
@@ -119,7 +119,7 @@ class StickerBoard {
     });
   }
   drawMoveRect(sticker: Sticker, hide: boolean) {
-    const {width, height, x, y, centerX, centerY} = sticker;
+    const {width, height, centerX: x, centerY: y, left: centerX, top: centerY} = sticker;
     this.ctx.beginPath();
     this.ctx.strokeStyle = "cyan";
     this.ctx.lineWidth = !hide ? 5 : 0;
@@ -131,7 +131,7 @@ class StickerBoard {
     this.ctx.closePath();
   }
   drawRemoveRect(sticker: Sticker, hide: boolean) {
-    const {x, y, centerX, centerY, width, height} = sticker;
+    const {centerX: x, centerY: y, left: centerX, top: centerY, width, height} = sticker;
     const arcX = centerX - this.ctx.lineWidth / 2;
     const arcY = centerY - this.ctx.lineWidth / 2;
     const radius = (this.handlSize / 2) + this.ctx.lineWidth;
@@ -148,7 +148,7 @@ class StickerBoard {
     this.ctx.closePath();
   }
   drawTransformRect(sticker: Sticker, hide: boolean) {
-    const {width, height, centerX, centerY} = sticker;
+    const {width, height, left: centerX, top: centerY} = sticker;
     const arcX = (centerX + width) - this.ctx.lineWidth / 2;
     const arcY = (centerY + height) - this.ctx.lineWidth / 2;
     const radius = (this.handlSize / 2) + this.ctx.lineWidth;
@@ -167,7 +167,7 @@ class StickerBoard {
   select(pageX: number, pageY: number) {
     for (const sticker of [...this.store].reverse()) {
       let isFouced: boolean = false;
-      setTransform(this.ctx, {x: sticker.x, y: sticker.y, rotate: sticker.rotate}, () => {
+      setTransform(this.ctx, {x: sticker.centerX, y: sticker.centerY, rotate: sticker.rotate}, () => {
         if (this.focus?.id === sticker.id) {
           // 스티커 삭제
           this.drawRemoveRect(sticker, true)
@@ -181,8 +181,8 @@ class StickerBoard {
           this.drawTransformRect(sticker, true) 
           if (this.ctx.isPointInPath(pageX, pageY)) {
             // console.log('transform');
-            this.originDegree = getDegree(pageX, pageY, sticker.x, sticker.y);
-            this.originDistance = getDistance(pageX, pageY, sticker.x, sticker.y);
+            this.originDegree = getDegree(pageX, pageY, sticker.centerX, sticker.centerY);
+            this.originDistance = getDistance(pageX, pageY, sticker.centerX, sticker.centerY);
             this.isTransform = true;
             isFouced = true;
           }
@@ -214,8 +214,8 @@ class StickerBoard {
   }
   transform( pageX: number, pageY: number, tx: number, ty: number ) {
     if (this.focus === null) return; 
-    const {img, x, y, offsetDegree, minScale, maxScale} = this.focus;
-    
+    const {img, centerX: x, centerY: y, offsetDegree, minScale, maxScale} = this.focus;
+    console.log(x, y);
     const currentDegree = getDegree(pageX, pageY, x, y);
     const deltaDegree = currentDegree - this.originDegree;
     this.focus.rotate += deltaDegree;
@@ -261,7 +261,7 @@ class StickerBoard {
   }
   moveHandler(ev: PointerMoveEvent, sticker: Sticker) {
     const {dx, dy, tx, ty, clientX, clientY} = ev;
-    const {x, y} = sticker;
+    const {centerX: x, centerY: y} = sticker;
     const [pageX, pageY] = this.correction(clientX, clientY);
     if (pageX <= this.canvas.width && pageY <= this.canvas.height) {
       if (this.focus === null) return;
