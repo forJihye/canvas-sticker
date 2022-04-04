@@ -45,6 +45,7 @@ class Sticker {
         height,
         minWidth,
         maxWidth,
+        rotate: 0,
         scale: scale,
         minScale: minWidth / img.width,
         maxScale: maxWidth / img.width,
@@ -103,7 +104,12 @@ class StickerBoard {
     this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
     if (this.background) this.ctx.drawImage(this.background, 0, 0);
     this.store.forEach(sticker => {
+      // this.ctx.save();
+      // this.ctx.translate(sticker.centerX, sticker.centerY);
+      // this.ctx.rotate((Math.PI / 180) * sticker.rotate);
+      // this.ctx.translate(-sticker.centerX, -sticker.centerY);
       this.drawImage(sticker.img, sticker.x, sticker.y, sticker.width, sticker.height)
+      // this.ctx.restore();
     });
     
     if (this.focus === null) return;
@@ -161,8 +167,7 @@ class StickerBoard {
         // 스티커 변형
         this.drawTransformRect(sticker, true) 
         if (this.ctx.isPointInPath(pageX, pageY)) {
-          this.originDegree = getDegree(pageX, pageY, sticker.x, sticker.y);
-          this.originDistance = getDistance(pageX, pageY, sticker.x, sticker.y);
+          
           this.isTransform = true;
           isFouced = true;
         }
@@ -199,15 +204,13 @@ class StickerBoard {
     this.draw();
   }
   transform(
-    x: number,
-    y: number,
-    width: number,
-    height: number,
-    offsetDegree: number,
+    sticker: Sticker,
     deltaDegree: number,
     currentDistance: number
   ) {
     if (this.focus === null) return; 
+    this.focus.rotate = deltaDegree;
+    console.log(this.focus.rotate)
   }
   // transform(tx: number, ty: number, x: number, y: number, width: number, height: number) {
   //   if (this.focus === null) return;
@@ -237,13 +240,9 @@ class StickerBoard {
     const {dx, dy, tx, ty, clientX, clientY} = ev;
     const {x, y, width, height, offsetDegree} = sticker;
     const [pageX, pageY] = this.correction(clientX, clientY);
-    
+    if (this.focus === null) return;
     if (this.isTransform) {
-      const currentDegree = getDegree(pageX, pageY, x, y);
-      const currentDistance = getDistance(pageX, pageY, x, y);
-      const deltaDegree = currentDegree - this.originDegree;
-      // this.transform(tx, ty, x, y, width, height)
-      this.transform(x, y, width, height, offsetDegree, deltaDegree, currentDistance)
+      this.transform(sticker, 0, 0)
       this.draw()
     } else {
       const moveX = comp(0 - width/2, x + tx, this.canvas.width - width/2);
