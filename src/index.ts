@@ -1,10 +1,6 @@
 import addDragControl, { PointerDownEvent, PointerMoveEvent, PointerUpEvent } from './drag-control';
 import './index.css';
-import { comp, Img, loadImage, setTransform } from './utils';
-
-/**
- * 캔버스에 그려진 이미지(스티커)를 삭제하고 자유자재로 드래그앤드랍, 리사이징, 회전 기능
- */
+import { comp, Img, loadImage } from './utils';
 
 const deleteButton = Img({
   src: "https://hashsnap-static.s3.ap-northeast-2.amazonaws.com/file/kiosk-file/button-delete-sticker.svg",
@@ -17,14 +13,20 @@ const rotateButton = Img({
 
 const getDegree = (cursorX: number, cursorY: number, centerX: number, centerY: number) => 180 - (Math.atan2(cursorX - centerX, cursorY - centerY) * 180) / Math.PI;
 const getDistance = (cursorX: number, cursorY: number, centerX: number, centerY: number) => Math.pow(Math.pow(cursorX - centerX, 2) + Math.pow(cursorY - centerY, 2), 1 / 2);
+const setTransform = (ctx: CanvasRenderingContext2D, { x, y, rotate }: { x: number, y: number, rotate: number }, f: () => void) => {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate((Math.PI / 180) * rotate);
+  ctx.translate(-x, -y);
+  f();
+  ctx.restore();
+};
 
 // 1. 스티커 노드 만들기
 class Sticker {
   id!: number;
   x!: number;
   y!: number;
-  width!: number;
-  height!: number;
   minWidth!: number;
   maxWidth!: number;
   scale!: number;
@@ -32,25 +34,20 @@ class Sticker {
   maxScale!: number;
   rotate!: number;
   offsetDegree!: number;
-  constructor (public img: HTMLImageElement, { id, left, top, defaultWidth = 200, minWidth = 80, maxWidth = 900 }: {id: number; left: number; top: number; defaultWidth?: number; minWidth?: number; maxWidth?: number}) {
+  constructor (public img: HTMLImageElement, { id, left, top, defaultWidth = 200, minWidth = 50, maxWidth = 600 }: {id: number; left: number; top: number; defaultWidth?: number; minWidth?: number; maxWidth?: number}) {
     const init = () => {
-      const scale = defaultWidth / img.width;
-      const width = img.width * scale;
-      const height = img.height * scale;
       Object.assign(this, {
         id,
-        x: - (width / 2) + left,
-        y: - (height / 2) + top,
-        width,
-        height,
+        x: left,
+        y: top,
         minWidth,
         maxWidth,
         rotate: 0,
-        scale: scale,
+        scale: defaultWidth / img.width,
         minScale: minWidth / img.width,
         maxScale: maxWidth / img.width,
         offsetDegree: getDegree(img.width, img.height, 0, 0)
-      })
+      });
     };
     img.complete && init();
     img.onload = () => init();
@@ -60,16 +57,18 @@ class Sticker {
     this.x = x;
     this.y = y;
   }
-  ratioResize(xRatio: number, yRatio: number, tx: number, ty: number, x: number, y: number, width: number, height: number) {
-    const prevWidth = width;
-    const prevHeight = height;
-    this.width = comp(width + tx, this.minWidth, this.maxWidth);
-    this.height = comp(height + ty, this.minWidth, this.maxWidth);
-    const dx = this.width - prevWidth;
-    const dy = this.height - prevHeight;
-    this.x = x - dx * xRatio;
-    this.y = y - dy * yRatio;
+  get width () {
+    return this.img.width * this.scale;
   }
+  get height () {
+    return this.img.height * this.scale;
+  }
+  get centerX  () {
+    return - (this.width / 2) + this.x;
+  } 
+  get centerY  () {
+    return - (this.height / 2) + this.y;
+  } 
 }
 
 // 2. 스티커 보드 
@@ -104,25 +103,27 @@ class StickerBoard {
     this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
     if (this.background) this.ctx.drawImage(this.background, 0, 0);
     this.store.forEach(sticker => {
-      // this.ctx.save();
-      // this.ctx.translate(sticker.centerX, sticker.centerY);
-      // this.ctx.rotate((Math.PI / 180) * sticker.rotate);
-      // this.ctx.translate(-sticker.centerX, -sticker.centerY);
-      this.drawImage(sticker.img, sticker.x, sticker.y, sticker.width, sticker.height)
-      // this.ctx.restore();
+      const {img, x, y, rotate, width, height, centerX, centerY} = sticker;
+      setTransform(this.ctx, {x, y, rotate}, () => {
+        this.drawImage(img, centerX, centerY, width, height);
+      });
     });
-    
+
     if (this.focus === null) return;
-    this.drawMoveRect(this.focus, false);
-    this.drawRemoveRect(this.focus, false);
-    this.drawTransformRect(this.focus, false)
+    setTransform(this.ctx, {x: this.focus.x, y: this.focus.y, rotate: this.focus.rotate}, () => {
+      if (this.focus) {
+        this.drawMoveRect(this.focus, false);
+        this.drawRemoveRect(this.focus, false);
+        this.drawTransformRect(this.focus, false)
+      }
+    });
   }
   drawMoveRect(sticker: Sticker, hide: boolean) {
-    const {width, height, x, y} = sticker;
+    const {width, height, x, y, centerX, centerY} = sticker;
     this.ctx.beginPath();
     this.ctx.strokeStyle = "cyan";
     this.ctx.lineWidth = !hide ? 5 : 0;
-    this.ctx.rect(x - (this.ctx.lineWidth / 2), y - (this.ctx.lineWidth / 2), width + this.ctx.lineWidth, height + this.ctx.lineWidth);
+    this.ctx.rect(centerX - (this.ctx.lineWidth / 2), centerY - (this.ctx.lineWidth / 2), width + this.ctx.lineWidth, height + this.ctx.lineWidth);
     if (!hide) {
       this.ctx.globalCompositeOperation = "difference";
       this.ctx.stroke();
@@ -130,26 +131,32 @@ class StickerBoard {
     this.ctx.closePath();
   }
   drawRemoveRect(sticker: Sticker, hide: boolean) {
-    const {width, height, x, y} = sticker;
+    const {centerX, centerY} = sticker;
+    const x = centerX - this.handlSize / 2;
+    const y = centerY - this.handlSize / 2;
     this.ctx.beginPath();
     this.ctx.strokeStyle = "cyan";
     this.ctx.lineWidth = !hide ? 5 : 0;
-    this.ctx.rect(x - this.handlSize / 2, y - this.handlSize / 2, this.handlSize, this.handlSize);
+    this.ctx.rect(x, y, this.handlSize, this.handlSize);
     if (!hide) {
       this.ctx.globalCompositeOperation = "source-over";
-      this.ctx.stroke();
+      this.ctx.drawImage(deleteButton, x, y, this.handlSize, this.handlSize);
+      // this.ctx.stroke();
     }
     this.ctx.closePath();
   }
   drawTransformRect(sticker: Sticker, hide: boolean) {
-    const {width, height, x, y} = sticker;
+    const {width, height, centerX, centerY} = sticker;
+    const x = (centerX + width) - this.handlSize / 2;
+    const y = (centerY + height) - this.handlSize / 2;
     this.ctx.beginPath();
     this.ctx.strokeStyle = "cyan";
     this.ctx.lineWidth = !hide ? 5 : 0;
-    this.ctx.rect((x + width) - this.handlSize / 2, (y + height) - this.handlSize / 2, this.handlSize, this.handlSize);
+    this.ctx.rect(x, y, this.handlSize, this.handlSize);
     if (!hide) {
       this.ctx.globalCompositeOperation = "source-over";
-      this.ctx.stroke();
+      this.ctx.drawImage(rotateButton, x, y, this.handlSize, this.handlSize);
+      // this.ctx.stroke();
     }
     this.ctx.closePath();
   }
@@ -167,7 +174,9 @@ class StickerBoard {
         // 스티커 변형
         this.drawTransformRect(sticker, true) 
         if (this.ctx.isPointInPath(pageX, pageY)) {
-          
+          if (this.focus === null) return;
+          this.originDegree = getDegree(pageX, pageY, sticker.x, sticker.y);
+          this.originDistance = getDistance(pageX, pageY, sticker.x, sticker.y);
           this.isTransform = true;
           isFouced = true;
         }
@@ -184,14 +193,7 @@ class StickerBoard {
     }
     // 캔버스 빈 공간 선택
     this.focus = null;
-    // const finded = this.store.find(node => {
-    //   const {centerX: x, centerY: y, width, height} = node;
-    //   if (pageX >= x && pageX <= x + width && pageY >= y && pageY <= y + height) {
-    //     return node;
-    //   }
-    // });
-    // this.forced = finded ?? null;
-    // return this.forced;
+    
   }
   move(x: number, y: number) {
     if(!this.focus) return;
@@ -203,22 +205,26 @@ class StickerBoard {
     this.setBoundingClientRect();
     this.draw();
   }
-  transform(
-    sticker: Sticker,
-    deltaDegree: number,
-    currentDistance: number
-  ) {
+  transform( pageX: number, pageY: number ) {
     if (this.focus === null) return; 
-    this.focus.rotate = deltaDegree;
-    console.log(this.focus.rotate)
+    const {img, x, y, offsetDegree, minScale, maxScale} = this.focus;
+
+    const currentDegree = getDegree(pageX, pageY, x, y);
+    const currentDistance = getDistance(pageX, pageY, x, y);
+    const deltaDegree = currentDegree - this.originDegree;
+    this.focus.rotate += deltaDegree;
+
+    const originWidth = Math.abs(Math.cos(180 / Math.PI * offsetDegree) * this.originDistance);
+    const currentWidth = Math.abs(Math.cos(180 / Math.PI * offsetDegree) * currentDistance);
+
+    this.focus.scale += currentWidth * 2 / img.width - originWidth * 2 / img.width;
+    this.focus.scale = comp(minScale, this.focus.scale, maxScale);
+
+    this.originDegree = currentDegree;
+    this.originDistance = currentDistance;
   }
-  // transform(tx: number, ty: number, x: number, y: number, width: number, height: number) {
-  //   if (this.focus === null) return;
-  //   tx = (ty * width) / height;
-  //   this.focus.ratioResize(0.5, 0.5, tx, ty, x, y, width, height);
-  // }
   correction(clientX: number, clientY: number): [number, number] {
-    const {left, top, width, height} = this.canvas.getBoundingClientRect();
+    const {left, top} = this.canvas.getBoundingClientRect();
     return [clientX - left, clientY - top];
   }
   setBackground(background: HTMLImageElement|HTMLCanvasElement) {
@@ -237,16 +243,17 @@ class StickerBoard {
     return this.focus;
   }
   moveHandler(ev: PointerMoveEvent, sticker: Sticker) {
-    const {dx, dy, tx, ty, clientX, clientY} = ev;
-    const {x, y, width, height, offsetDegree} = sticker;
+    const {tx, ty, clientX, clientY} = ev;
+    const {x, y} = sticker;
     const [pageX, pageY] = this.correction(clientX, clientY);
     if (this.focus === null) return;
+
     if (this.isTransform) {
-      this.transform(sticker, 0, 0)
-      this.draw()
+      this.transform(pageX, pageY);
+      this.draw();
     } else {
-      const moveX = comp(0 - width/2, x + tx, this.canvas.width - width/2);
-      const moveY = comp(0 - height/2, y + ty, this.canvas.height - height/2);
+      const moveX = comp(0, x + tx, this.canvas.width);
+      const moveY = comp(0, y + ty, this.canvas.height);
       this.move(moveX, moveY);
       this.draw()
     }
@@ -312,3 +319,11 @@ const main = async () => {try {
 }}
 
 main();
+// const finded = this.store.find(node => {
+//   const {centerX: x, centerY: y, width, height} = node;
+//   if (pageX >= x && pageX <= x + width && pageY >= y && pageY <= y + height) {
+//     return node;
+//   }
+// });
+// this.forced = finded ?? null;
+// return this.forced;
