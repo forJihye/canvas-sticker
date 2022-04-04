@@ -1,6 +1,6 @@
-import addDragControl, { PointerMoveEvent } from './drag-control';
+import addDragControl, { PointerDownEvent, PointerMoveEvent, PointerUpEvent } from './drag-control';
 import './index.css';
-import { Img, loadImage, setTransform } from './utils';
+import { comp, Img, loadImage, setTransform } from './utils';
 
 /**
  * 캔버스에 그려진 이미지(스티커)를 삭제하고 자유자재로 드래그앤드랍, 리사이징, 회전 기능
@@ -15,48 +15,59 @@ const rotateButton = Img({
   crossOrigin: "anonymous"
 });
 
+const getDegree = (cursorX: number, cursorY: number, centerX: number, centerY: number) => 180 - (Math.atan2(cursorX - centerX, cursorY - centerY) * 180) / Math.PI;
+const getDistance = (cursorX: number, cursorY: number, centerX: number, centerY: number) => Math.pow(Math.pow(cursorX - centerX, 2) + Math.pow(cursorY - centerY, 2), 1 / 2);
+
 // 1. 스티커 노드 만들기
 class Sticker {
+  id!: number;
   x!: number;
   y!: number;
+  width!: number;
+  height!: number;
+  minWidth!: number;
+  maxWidth!: number;
   scale!: number;
   minScale!: number;
   maxScale!: number;
-  constructor (public img: HTMLImageElement, { x, y, defaultWidth = 200, minWidth = 80, maxWidth = 900 }: {x?: number; y?: number; defaultWidth?: number; minWidth?: number; maxWidth?: number}) {
-    const init = () => Object.assign(this, {
-      x,
-      y,
-      scale: defaultWidth / img.width,
-      minScale: minWidth / img.width,
-      maxScale: maxWidth / img.width,
-    });
+  rotate!: number;
+  offsetDegree!: number;
+  constructor (public img: HTMLImageElement, { id, left, top, defaultWidth = 200, minWidth = 80, maxWidth = 900 }: {id: number; left: number; top: number; defaultWidth?: number; minWidth?: number; maxWidth?: number}) {
+    const init = () => {
+      const scale = defaultWidth / img.width;
+      const width = img.width * scale;
+      const height = img.height * scale;
+      Object.assign(this, {
+        id,
+        x: - (width / 2) + left,
+        y: - (height / 2) + top,
+        width,
+        height,
+        minWidth,
+        maxWidth,
+        scale: scale,
+        minScale: minWidth / img.width,
+        maxScale: maxWidth / img.width,
+        offsetDegree: getDegree(img.width, img.height, 0, 0)
+      })
+    };
     img.complete && init();
     img.onload = () => init();
     console.log(this);
   }
-  get width () {
-    return this.img.width * this.scale;
-  }
-  get height () {
-    return this.img.height * this.scale;
-  }
-  get widthHalf() {
-    return this.width / 2;
-  }
-  get heightHalf() {
-    return this.height / 2;
-  }
-  get centerX() {
-    return - this.widthHalf + this.x;
-    // return this.x - this.widthHalf;
-  }
-  get centerY() {
-    return - this.heightHalf + this.y;
-    // return this.y - this.heightHalf;
-  }
   move(x: number, y: number){
     this.x = x;
     this.y = y;
+  }
+  ratioResize(xRatio: number, yRatio: number, tx: number, ty: number, x: number, y: number, width: number, height: number) {
+    const prevWidth = width;
+    const prevHeight = height;
+    this.width = comp(width + tx, this.minWidth, this.maxWidth);
+    this.height = comp(height + ty, this.minWidth, this.maxWidth);
+    const dx = this.width - prevWidth;
+    const dy = this.height - prevHeight;
+    this.x = x - dx * xRatio;
+    this.y = y - dy * yRatio;
   }
 }
 
@@ -64,7 +75,7 @@ class Sticker {
 class StickerBoard {
   private handlSize = 50;
   store: Sticker[] = [];
-  forced: Sticker|null = null;
+  focus: Sticker|null = null;
 
   canvas!: HTMLCanvasElement;
   ctx!: CanvasRenderingContext2D;
@@ -74,6 +85,9 @@ class StickerBoard {
   top!: number;
   background!: HTMLImageElement|HTMLCanvasElement;
 
+  isTransform: boolean = false;
+  originDegree: number = 0;
+  originDistance: number = 0;
   init(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
     this.width = canvas.width;
@@ -82,62 +96,89 @@ class StickerBoard {
     this.top = canvas.offsetTop;
     this.ctx = canvas.getContext('2d') as CanvasRenderingContext2D;
   }
-  moveHandler(ev: PointerMoveEvent, sticker: Sticker) {
-    console.log('moveHandler', sticker)
-    this.move(sticker.x + ev.dx, sticker.y + ev.dy);
-  }
-  upHandler(ev: PointerMoveEvent, sticker: Sticker) {
-    console.log('upHandler', sticker);
-  }
   drawImage(img: HTMLImageElement, x: number, y: number, width: number, height: number) {
     this.ctx.drawImage(img, x, y, width, height);
   }
   draw() {
-    if (!this.forced) return console.warn('not found sticker image');
     this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
     if (this.background) this.ctx.drawImage(this.background, 0, 0);
     this.store.forEach(sticker => {
-      this.drawImage(sticker.img, sticker.centerX, sticker.centerY, sticker.width, sticker.height)
+      this.drawImage(sticker.img, sticker.x, sticker.y, sticker.width, sticker.height)
     });
-
-    this.drawMoveRect(this.forced);
-    this.drawRemoveRect(this.forced);
+    
+    if (this.focus === null) return;
+    this.drawMoveRect(this.focus, false);
+    this.drawRemoveRect(this.focus, false);
+    this.drawTransformRect(this.focus, false)
   }
-  drawMoveRect(sticker: Sticker) {
-    const {width, height, centerX: x, centerY: y} = sticker;
+  drawMoveRect(sticker: Sticker, hide: boolean) {
+    const {width, height, x, y} = sticker;
     this.ctx.beginPath();
     this.ctx.strokeStyle = "cyan";
-    this.ctx.lineWidth = 5;
+    this.ctx.lineWidth = !hide ? 5 : 0;
     this.ctx.rect(x - (this.ctx.lineWidth / 2), y - (this.ctx.lineWidth / 2), width + this.ctx.lineWidth, height + this.ctx.lineWidth);
-
-    this.ctx.globalCompositeOperation = "difference";
-    this.ctx.stroke();
-
+    if (!hide) {
+      this.ctx.globalCompositeOperation = "difference";
+      this.ctx.stroke();
+    }
     this.ctx.closePath();
   }
-  drawRemoveRect(sticker: Sticker) {
-    const {width, height, centerX: x, centerY: y} = sticker;
+  drawRemoveRect(sticker: Sticker, hide: boolean) {
+    const {width, height, x, y} = sticker;
     this.ctx.beginPath();
     this.ctx.strokeStyle = "cyan";
-    this.ctx.lineWidth = 5;
+    this.ctx.lineWidth = !hide ? 5 : 0;
     this.ctx.rect(x - this.handlSize / 2, y - this.handlSize / 2, this.handlSize, this.handlSize);
-    this.ctx.globalCompositeOperation = "difference";
-    this.ctx.stroke();
+    if (!hide) {
+      this.ctx.globalCompositeOperation = "source-over";
+      this.ctx.stroke();
+    }
     this.ctx.closePath();
   }
-  move(x: number, y: number) {
-    if(!this.forced) return;
-    this.forced.move(x, y);
-    this.draw();
-  }
-  add(sticker: Sticker) {
-    this.forced = sticker;
-    this.store.push(sticker);
-    this.setBoundingClientRect();
-    this.draw();
+  drawTransformRect(sticker: Sticker, hide: boolean) {
+    const {width, height, x, y} = sticker;
+    this.ctx.beginPath();
+    this.ctx.strokeStyle = "cyan";
+    this.ctx.lineWidth = !hide ? 5 : 0;
+    this.ctx.rect((x + width) - this.handlSize / 2, (y + height) - this.handlSize / 2, this.handlSize, this.handlSize);
+    if (!hide) {
+      this.ctx.globalCompositeOperation = "source-over";
+      this.ctx.stroke();
+    }
+    this.ctx.closePath();
   }
   find(pageX: number, pageY: number) {
-    console.log(this.ctx.isPointInPath(pageX, pageY))
+    for (const sticker of [...this.store].reverse()) {
+      let isFouced: boolean = false;
+      if (this.focus?.id === sticker.id) {
+        // 스티커 삭제
+        this.drawRemoveRect(sticker, true)
+        if (this.ctx.isPointInPath(pageX, pageY)) {  
+          this.focus = null;
+          this.store.splice(this.store.indexOf(sticker), 1);
+          isFouced = true;
+        }
+        // 스티커 변형
+        this.drawTransformRect(sticker, true) 
+        if (this.ctx.isPointInPath(pageX, pageY)) {
+          this.originDegree = getDegree(pageX, pageY, sticker.x, sticker.y);
+          this.originDistance = getDistance(pageX, pageY, sticker.x, sticker.y);
+          this.isTransform = true;
+          isFouced = true;
+        }
+      }
+      // 현재 선택 스티커 해제 후 다른 스티커 선택
+      this.drawMoveRect(sticker, true);
+      if (this.ctx.isPointInPath(pageX, pageY)) {
+        this.focus = sticker;
+        this.store.push(...this.store.splice(this.store.indexOf(sticker), 1));
+        this.isTransform = false;
+        isFouced = true;
+      }
+      if (isFouced) return;
+    }
+    // 캔버스 빈 공간 선택
+    this.focus = null;
     // const finded = this.store.find(node => {
     //   const {centerX: x, centerY: y, width, height} = node;
     //   if (pageX >= x && pageX <= x + width && pageY >= y && pageY <= y + height) {
@@ -147,12 +188,35 @@ class StickerBoard {
     // this.forced = finded ?? null;
     // return this.forced;
   }
+  move(x: number, y: number) {
+    if(!this.focus) return;
+    this.focus.move(x, y);
+  }
+  add(sticker: Sticker) {
+    this.focus = sticker;
+    this.store.push(sticker);
+    this.setBoundingClientRect();
+    this.draw();
+  }
+  transform(
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    offsetDegree: number,
+    deltaDegree: number,
+    currentDistance: number
+  ) {
+    if (this.focus === null) return; 
+  }
+  // transform(tx: number, ty: number, x: number, y: number, width: number, height: number) {
+  //   if (this.focus === null) return;
+  //   tx = (ty * width) / height;
+  //   this.focus.ratioResize(0.5, 0.5, tx, ty, x, y, width, height);
+  // }
   correction(clientX: number, clientY: number): [number, number] {
     const {left, top, width, height} = this.canvas.getBoundingClientRect();
     return [clientX - left, clientY - top];
-  }
-  transform(sticker: Sticker, f: () => void) {
-    // setTransform(this.ctx, { x: sticker.x, y: sticker.y, rotate: 0 }, f);
   }
   setBackground(background: HTMLImageElement|HTMLCanvasElement) {
     this.background = background;
@@ -161,6 +225,35 @@ class StickerBoard {
   setBoundingClientRect() {
     const { left, top, width, height } = this.canvas.getBoundingClientRect();
     Object.assign(this, { top, left, width, height });
+  }
+  downHandler(ev: PointerDownEvent) {
+    const {clientX, clientY} = ev;
+    const [pageX, pageY] = this.correction(clientX, clientY);
+    this.find(pageX, pageY);
+    this.draw();
+    return this.focus;
+  }
+  moveHandler(ev: PointerMoveEvent, sticker: Sticker) {
+    const {dx, dy, tx, ty, clientX, clientY} = ev;
+    const {x, y, width, height, offsetDegree} = sticker;
+    const [pageX, pageY] = this.correction(clientX, clientY);
+    
+    if (this.isTransform) {
+      const currentDegree = getDegree(pageX, pageY, x, y);
+      const currentDistance = getDistance(pageX, pageY, x, y);
+      const deltaDegree = currentDegree - this.originDegree;
+      // this.transform(tx, ty, x, y, width, height)
+      this.transform(x, y, width, height, offsetDegree, deltaDegree, currentDistance)
+      this.draw()
+    } else {
+      const moveX = comp(0 - width/2, x + tx, this.canvas.width - width/2);
+      const moveY = comp(0 - height/2, y + ty, this.canvas.height - height/2);
+      this.move(moveX, moveY);
+      this.draw()
+    }
+  }
+  upHandler(ev: PointerUpEvent, sticker: Sticker) {
+    console.log('upHandler', sticker);
   }
 }
 
@@ -186,13 +279,13 @@ const main = async () => {try {
   document.body.appendChild(stickerInner);
   document.body.appendChild(canvas);
 
-  [img1, img2, img3, img4].forEach((img) => {
+  [img1, img2, img3, img4].forEach((img, i) => {
     img.style.width = "auto";
     img.style.height = "85px";
     img.style.margin = "0 auto";
     img.onclick = (ev) => {
       ev.preventDefault();
-      const sticker = new Sticker(img as HTMLImageElement, {x: canvas.width / 2, y: canvas.height / 2});
+      const sticker = new Sticker(img as HTMLImageElement, {id: i, left: canvas.width / 2, top: canvas.height / 2});
       stickerBoard.add(Object.assign(sticker));
     };
     stickerInner.appendChild(img);
@@ -202,15 +295,12 @@ const main = async () => {try {
   dragListener?.();
   dragListener = addDragControl(canvas, {
     down: (ev) => {
-      const {ox, oy, clientX, clientY} = ev;
-      const [pageX, pageY] = stickerBoard.correction(clientX, clientY);
-      const target = stickerBoard.find(pageX, pageY);
-      return target;
+      const target = stickerBoard.downHandler(ev);
+      return {...target};
     }, 
     move: (ev, payload) => {
       const {dx, dy, tx, ty} = ev;
       stickerBoard.moveHandler(ev, payload);
-      // stickerBoard.move({tx: dy, ty: dx}, payload);
     }, 
     up: (ev, payload) => {
       const {dx, dy, tx, ty} = ev;

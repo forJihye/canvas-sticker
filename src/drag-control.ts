@@ -20,8 +20,10 @@ const dragControl = new class DragControl {
   }
   pointerdown(ev: PointerEvent){
     const {clientX, clientY} = ev;
-    this.tx = this.prevX = clientX;
-    this.ty = this.prevY = clientY;
+    this.prevX = clientX;
+    this.prevY = clientY;
+    this.tx = clientX;
+    this.ty = clientY;
     
     this.down?.(Object.assign(ev, {ox: this.prevX, oy: this.prevY}));
   }
@@ -78,7 +80,8 @@ const addDragControl = (
     if (payload === null || payload === undefined) {
       dragControl.setMove();
       dragControl.setUp();
-      dragControl.clear()
+      // dragControl.clear()
+      cancel?.(ev);
     } else {
       dragControl.payload = payload;
       dragControl.setMove(move);

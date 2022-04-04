@@ -16,3 +16,6 @@ export const setTransform = (ctx: CanvasRenderingContext2D, { x, y, rotate }: { 
   f();
   ctx.restore();
 };
+
+
+export const comp = (val: number, min: number, max: number) => Math.min(max, Math.max(min, val));
