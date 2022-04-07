@@ -11,16 +11,14 @@ const rotateButton = Img({
   crossOrigin: "anonymous"
 });
 
-const getDegree = (cursorX: number, cursorY: number, centerX: number, centerY: number) => 180 - (Math.atan2(cursorX - centerX, cursorY - centerY) * 180) / Math.PI;
-const getDistance = (cursorX: number, cursorY: number, centerX: number, centerY: number) => Math.pow(Math.pow(cursorX - centerX, 2) + Math.pow(cursorY - centerY, 2), 1 / 2);
-const setTransform = (ctx: CanvasRenderingContext2D, { x, y, rotate }: { x: number, y: number, rotate: number }, f: () => void) => {
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.rotate((Math.PI / 180) * rotate);
-  ctx.translate(-x, -y);
-  f();
-  ctx.restore();
-};
+const getDegree = (cursorX: number, cursorY: number, centerX: number, centerY: number) => {
+  return 180 - (Math.atan2(cursorX - centerX, cursorY - centerY) * 180) / Math.PI;
+}
+
+// https://ffoorreeuunn.tistory.com/128
+const getDistance = (cursorX: number, cursorY: number, centerX: number, centerY: number) => {
+  return Math.sqrt(Math.pow(cursorX - centerX, 2) + Math.pow(cursorY - centerY, 2))
+}
 
 // 1. 스티커 노드 만들기
 class Sticker {
@@ -104,13 +102,13 @@ class StickerBoard {
     if (this.background) this.ctx.drawImage(this.background, 0, 0);
     this.store.forEach(sticker => {
       const {img, centerX: x, centerY: y, rotate, width, height, left: centerX, top: centerY} = sticker;
-      setTransform(this.ctx, {x, y, rotate}, () => {
+      this.setTransform({x, y, rotate}, () => {
         this.drawImage(img, centerX, centerY, width, height);
       });
     });
 
     if (this.focus === null) return;
-    setTransform(this.ctx, {x: this.focus.centerX, y: this.focus.centerY, rotate: this.focus.rotate}, () => {
+    this.setTransform({x: this.focus.centerX, y: this.focus.centerY, rotate: this.focus.rotate}, () => {
       if (this.focus) {
         this.drawMoveRect(this.focus, false);
         this.drawRemoveRect(this.focus, false);
@@ -167,7 +165,7 @@ class StickerBoard {
   select(pageX: number, pageY: number) {
     for (const sticker of [...this.store].reverse()) {
       let isFouced: boolean = false;
-      setTransform(this.ctx, {x: sticker.centerX, y: sticker.centerY, rotate: sticker.rotate}, () => {
+      this.setTransform({x: sticker.centerX, y: sticker.centerY, rotate: sticker.rotate}, () => {
         if (this.focus?.id === sticker.id) {
           // 스티커 삭제
           this.drawRemoveRect(sticker, true)
@@ -225,24 +223,22 @@ class StickerBoard {
     const currentWidth = Math.abs(Math.cos(180 / Math.PI * offsetDegree) * currentDistance);
 
     this.focus.scale += currentWidth * 2 / img.width - originWidth * 2 / img.width;
-    this.focus.scale = comp(this.focus.scale, minScale, maxScale);
+    this.focus.scale = comp(this.focus.scale, minScale, maxScale);``
 
     this.originDegree = currentDegree;
     this.originDistance = currentDistance;
   }
-  correctionScaleX(v: number) {
-    return v * this.canvas.width / this.width;
-  }
-  correctionScaleY(v: number) {
-    return v * this.canvas.height / this.height
-  }
+  setTransform = ({ x, y, rotate }: { x: number, y: number, rotate: number }, f: () => void) => {
+    this.ctx.save();
+    this.ctx.translate(x, y);
+    this.ctx.rotate((Math.PI / 180) * rotate);
+    this.ctx.translate(-x, -y);
+    f();
+    this.ctx.restore();
+  };
   correction(clientX: number, clientY: number): [number, number] {
     const {left, top} = this.canvas.getBoundingClientRect();
     return [clientX - left, clientY - top];
-    // return [
-    //   this.correctionScaleX(clientX - left - window.scrollX),
-    //   this.correctionScaleY(clientY - top - window.scrollY),
-    // ];
   }
   setBackground(background: HTMLImageElement|HTMLCanvasElement) {
     this.background = background;
